@@ -22,4 +22,3 @@ steps:
     tags: |
       latest
       $(tag)
-
