@@ -52,7 +52,7 @@ builder.Services.AddSwaggerGen(config =>
 builder.Services.AddMvc(options => options.Filters.Add(typeof(ExceptionFilter)));
 
 // DependencyInjectionExtension de Infrastructure -> DbContext; Repositórios
-builder.Services.AddInfrastructure(builder.Configuration);
+// builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddApplication();
 
 builder.Services.AddScoped<ITokenProvider, HttpContextTokenValue>();
@@ -78,8 +78,8 @@ builder.Services.AddAuthentication(config =>
 
 builder.Services.AddRouting(options => options.LowercaseUrls = true);
 
-builder.Services.AddHealthChecks().AddDbContextCheck<CashFlowDbContext>();
-
+builder.Services.AddHealthChecks()
+    
 var app = builder.Build();
 
 app.MapHealthChecks("/Health", new HealthCheckOptions
