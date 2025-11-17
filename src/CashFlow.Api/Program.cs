@@ -78,7 +78,7 @@ builder.Services.AddAuthentication(config =>
 
 builder.Services.AddRouting(options => options.LowercaseUrls = true);
 
-builder.Services.AddHealthChecks()
+builder.Services.AddHealthChecks();
     
 var app = builder.Build();
 
