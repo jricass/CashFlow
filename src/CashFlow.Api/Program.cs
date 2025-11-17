@@ -1,42 +1,120 @@
+using System.Text;
+using CashFlow.Api.Filters;
+using CashFlow.Application;
+using CashFlow.Infrastructure;
+using CashFlow.Infrastructure.Migrations;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using CashFlow.Infrastructure.Extensions;
+using CashFlow.Domain.Security.Tokens;
+using CashFlow.Api.Token;
+using CashFlow.Infrastructure.DataAccess;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+
 var builder = WebApplication.CreateBuilder(args);
 
-/*
- * 1. ADICIONE O SERVIÇO BÁSICO DE HEALTH CHECK
- * Isso apenas verifica se a API está "viva",
- * não vai checar o banco de dados.
- */
-builder.Services.AddHealthChecks();
-
-// Adicione outros serviços se precisar (como Controllers)
 builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen(config =>
+{
+    config.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Description = @"JWT Authorization header using the Bearer scheme.
+                        Enter 'Bearer' [space] and the your token in the text input below.
+                        Example: 'Bearer 12345abcdef'",
+        In = ParameterLocation.Header,
+        Scheme = "Bearer",
+        Type = SecuritySchemeType.ApiKey
+    });
 
-/*
- * 2. NÃO REGISTRE O DBCONTEXT
- * Vamos pular o `builder.Services.AddDbContext<...>()`
- * de propósito, para simular a falha que você quer evitar.
- */
+    config.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                },
+                Scheme = "oauth2",
+                Name = "Bearer",
+                In = ParameterLocation.Header
+            },
+            new List<string>()
+        }
+    });
+});
 
+builder.Services.AddMvc(options => options.Filters.Add(typeof(ExceptionFilter)));
 
-// ----------
+// DependencyInjectionExtension de Infrastructure -> DbContext; Repositórios
+builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddApplication();
+
+builder.Services.AddScoped<ITokenProvider, HttpContextTokenValue>();
+
+builder.Services.AddHttpContextAccessor();
+
+var signingKey = builder.Configuration.GetValue<string>("Settings:Jwt:SigningKey");
+
+builder.Services.AddAuthentication(config =>
+{
+    config.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    config.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+}).AddJwtBearer(config =>
+{
+    config.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ClockSkew = new TimeSpan(0),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey!))
+    };
+});
+
+builder.Services.AddRouting(options => options.LowercaseUrls = true);
+
+builder.Services.AddHealthChecks().AddDbContextCheck<CashFlowDbContext>();
+
 var app = builder.Build();
-// ----------
 
+app.MapHealthChecks("/Health", new HealthCheckOptions
+{
+    AllowCachingResponses = false,
+    ResultStatusCodes =
+    {
+        [HealthStatus.Healthy] = StatusCodes.Status200OK,
+        [HealthStatus.Unhealthy] = StatusCodes.Status503ServiceUnavailable,
+    }
+});
 
-/*
- * 3. MAPEIE O ENDPOINT DE HEALTH CHECK
- * Isso cria o endpoint /health
- */
-app.MapHealthChecks("/health");
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapControllers();
 
-/*
- * 4. NÃO CHAME A MIGRAÇÃO DO BANCO!
- * No seu log, o erro vinha de uma chamada aqui (perto da linha 117).
- * A linha parecida com 'MigrateDatabase(app.Services)' deve ser
- * COMENTADA ou REMOVIDA para este teste.
- *
- * // DataBaseMigration.MigrateDatabase(app.Services); // <-- LINHA DESATIVADA
- */
+if (builder.Configuration.IsTestEnvironment() == false)
+{
+    await MigrateDatabase();
+}
 
 app.Run();
+
+async Task MigrateDatabase()
+{
+    await using var scope = app.Services.CreateAsyncScope();
+
+    await DataBaseMigration.MigrateDatabase(scope.ServiceProvider);
+}
+
+public partial class Program { }
